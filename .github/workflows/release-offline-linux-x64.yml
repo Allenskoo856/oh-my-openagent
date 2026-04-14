@@ -2,13 +2,15 @@ name: release-offline-linux-x64
 
 on:
   push:
+    branches:
+      - codex/v3.17.2-musl-fallback
     tags:
       - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version without leading v, for example 3.17.2"
-        required: true
+        description: "Release version without leading v, for example 3.17.2. Leave empty to use package.json."
+        required: false
         type: string
       ref:
         description: "Git ref to build from"
@@ -26,15 +28,48 @@ jobs:
         id: meta
         shell: bash
         run: |
+          sanitize_ref() {
+            printf '%s' "$1" | tr '/[:upper:]' '-[:lower:]' | tr -cd 'a-z0-9._-'
+          }
+
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             VERSION="${{ inputs.version }}"
             REF="${{ inputs.ref }}"
             if [[ -z "${REF}" ]]; then
-              REF="refs/tags/v${VERSION}"
+              REF="${GITHUB_REF}"
             fi
-          else
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
             REF="${GITHUB_REF}"
+          else
+            REF="${GITHUB_REF}"
+          fi
+
+          echo "ref=${REF}" >> "${GITHUB_OUTPUT}"
+          REF_SLUG="$(sanitize_ref "${GITHUB_REF_NAME}")"
+          echo "ref_slug=${REF_SLUG}" >> "${GITHUB_OUTPUT}"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "release_tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
+            echo "release_name=v${VERSION}" >> "${GITHUB_OUTPUT}"
+            echo "is_prerelease=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "release_tag=offline-linux-x64-${REF_SLUG}" >> "${GITHUB_OUTPUT}"
+            echo "release_name=Offline Linux x64 (${GITHUB_REF_NAME})" >> "${GITHUB_OUTPUT}"
+            echo "is_prerelease=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.ref }}
+
+      - name: Resolve package version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ -z "${VERSION}" ]]; then
+            VERSION="$(node -p "require('./package.json').version")"
           fi
 
           if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
@@ -43,12 +78,6 @@ jobs:
           fi
 
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "ref=${REF}" >> "${GITHUB_OUTPUT}"
-
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.meta.outputs.ref }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -74,18 +103,22 @@ jobs:
           bun build src/cli/index.ts --compile --minify --target=bun-linux-x64-musl-baseline --outfile=packages/linux-x64-musl-baseline/bin/oh-my-opencode
 
       - name: Build offline bundle
-        run: ./script/build-offline-linux-x64-bundle.sh "${{ steps.meta.outputs.version }}"
+        run: ./script/build-offline-linux-x64-bundle.sh "${{ steps.version.outputs.version }}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: offline-linux-x64-${{ steps.meta.outputs.version }}
-          path: release-assets/oh-my-opencode-offline-linux-x64-${{ steps.meta.outputs.version }}.tar.gz
+          name: offline-linux-x64-${{ steps.version.outputs.version }}-${{ steps.meta.outputs.ref_slug }}
+          path: release-assets/oh-my-opencode-offline-linux-x64-${{ steps.version.outputs.version }}.tar.gz
           if-no-files-found: error
 
       - name: Publish release asset
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          files: release-assets/oh-my-opencode-offline-linux-x64-${{ steps.meta.outputs.version }}.tar.gz
+          tag_name: ${{ steps.meta.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.meta.outputs.release_name }}
+          prerelease: ${{ steps.meta.outputs.is_prerelease }}
+          files: release-assets/oh-my-opencode-offline-linux-x64-${{ steps.version.outputs.version }}.tar.gz
           generate_release_notes: true
+          overwrite_files: true

@@ -116,6 +116,12 @@ git push origin v3.17.2
 
 That triggers the `release-offline-linux-x64` GitHub Actions workflow, which builds a self-contained Linux x64 offline bundle and attaches it to the GitHub Release.
 
+For this working branch, a normal push also triggers the same workflow and updates a branch-specific prerelease in GitHub Releases:
+
+```bash
+git push origin codex/v3.17.2-musl-fallback
+```
+
 On the target machine:
 
 ```bash
