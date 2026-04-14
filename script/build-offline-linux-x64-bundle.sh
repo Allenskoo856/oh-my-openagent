@@ -46,6 +46,13 @@ pack_local_package() {
   npm_config_ignore_scripts=true npm pack "${source_dir}" --pack-destination "${VENDOR_DIR}" >/dev/null
 }
 
+unpack_vendor_package() {
+  local package_name="${1}"
+  local target_dir="${2}"
+  mkdir -p "${target_dir}"
+  tar -xzf "${VENDOR_DIR}/${package_name}-${VERSION}.tgz" -C "${target_dir}" --strip-components=1
+}
+
 copy_root_package
 copy_platform_package "linux-x64"
 copy_platform_package "linux-x64-baseline"
@@ -63,13 +70,16 @@ cat > "${STAGE_DIR}/package.json" <<EOF
   "dependencies": {
     "oh-my-opencode": "file:vendor/oh-my-opencode-${VERSION}.tgz",
     "oh-my-opencode-linux-x64": "file:vendor/oh-my-opencode-linux-x64-${VERSION}.tgz",
-    "oh-my-opencode-linux-x64-baseline": "file:vendor/oh-my-opencode-linux-x64-baseline-${VERSION}.tgz",
-    "oh-my-opencode-linux-x64-musl-baseline": "file:vendor/oh-my-opencode-linux-x64-musl-baseline-${VERSION}.tgz"
+    "oh-my-opencode-linux-x64-baseline": "file:vendor/oh-my-opencode-linux-x64-baseline-${VERSION}.tgz"
   }
 }
 EOF
 
 (cd "${STAGE_DIR}" && npm install --omit=dev)
+
+unpack_vendor_package \
+  "oh-my-opencode-linux-x64-musl-baseline" \
+  "${STAGE_DIR}/node_modules/oh-my-opencode-linux-x64-musl-baseline"
 
 cat > "${STAGE_DIR}/package.json" <<EOF
 {
