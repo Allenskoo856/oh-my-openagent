@@ -103,6 +103,43 @@ https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/refs/heads/dev/do
 
 Or read the [Installation Guide](docs/guide/installation.md), but seriously, let an agent do it. Humans fat-finger configs.
 
+### Offline Installation for Linux x64
+
+If you need a fully offline bundle for Linux x64, this repository now publishes a release asset named like `oh-my-opencode-offline-linux-x64-<version>.tar.gz` on tagged releases.
+
+Release process for this fork:
+
+```bash
+git tag v3.17.2
+git push origin v3.17.2
+```
+
+That triggers the `release-offline-linux-x64` GitHub Actions workflow, which builds a self-contained Linux x64 offline bundle and attaches it to the GitHub Release.
+
+On the target machine:
+
+```bash
+tar -xzf oh-my-opencode-offline-linux-x64-<version>.tar.gz
+cd oh-my-opencode-offline-linux-x64-<version>
+./install.sh
+```
+
+The bundle includes:
+
+- `oh-my-opencode`
+- `oh-my-opencode-linux-x64`
+- `oh-my-opencode-linux-x64-baseline`
+- `oh-my-opencode-linux-x64-musl-baseline`
+
+After installation, disable telemetry in the target shell:
+
+```bash
+export OMO_SEND_ANONYMOUS_TELEMETRY=0
+export OMO_DISABLE_POSTHOG=1
+```
+
+The installer writes to `~/.config/opencode` by default. Override with `OPENCODE_CONFIG_DIR=/path/to/opencode ./install.sh` if needed.
+
 ### For LLM Agents
 
 Fetch the installation guide and follow it:

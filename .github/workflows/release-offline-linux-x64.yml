@@ -1,0 +1,91 @@
+name: release-offline-linux-x64
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without leading v, for example 3.17.2"
+        required: true
+        type: string
+      ref:
+        description: "Git ref to build from"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-offline-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version and ref
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+            REF="${{ inputs.ref }}"
+            if [[ -z "${REF}" ]]; then
+              REF="refs/tags/v${VERSION}"
+            fi
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+            REF="${GITHUB_REF}"
+          fi
+
+          if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Invalid version ${VERSION}"
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${REF}" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.ref }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: bun install
+        env:
+          BUN_INSTALL_ALLOW_SCRIPTS: "@ast-grep/napi"
+
+      - name: Build plugin artifacts
+        run: bun run build
+
+      - name: Build Linux x64 binaries
+        shell: bash
+        run: |
+          bun build src/cli/index.ts --compile --minify --target=bun-linux-x64 --outfile=packages/linux-x64/bin/oh-my-opencode
+          bun build src/cli/index.ts --compile --minify --target=bun-linux-x64-baseline --outfile=packages/linux-x64-baseline/bin/oh-my-opencode
+          bun build src/cli/index.ts --compile --minify --target=bun-linux-x64-musl-baseline --outfile=packages/linux-x64-musl-baseline/bin/oh-my-opencode
+
+      - name: Build offline bundle
+        run: ./script/build-offline-linux-x64-bundle.sh "${{ steps.meta.outputs.version }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-linux-x64-${{ steps.meta.outputs.version }}
+          path: release-assets/oh-my-opencode-offline-linux-x64-${{ steps.meta.outputs.version }}.tar.gz
+          if-no-files-found: error
+
+      - name: Publish release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          files: release-assets/oh-my-opencode-offline-linux-x64-${{ steps.meta.outputs.version }}.tar.gz
+          generate_release_notes: true
