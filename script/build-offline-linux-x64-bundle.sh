@@ -116,6 +116,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${OPENCODE_CONFIG_DIR:-${HOME}/.config/opencode}"
+PLUGIN_ENTRY="$(node -p "require('${SCRIPT_DIR}/package.json').dependencies['oh-my-opencode']" 2>/dev/null || true)"
+
+backup_file() {
+  local file_path="${1}"
+  local timestamp
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  cp "${file_path}" "${file_path}.bak.${timestamp}"
+  echo "${file_path}.bak.${timestamp}"
+}
+
+resolve_opencode_config_path() {
+  if [[ -f "${TARGET_DIR}/opencode.jsonc" ]]; then
+    echo "${TARGET_DIR}/opencode.jsonc"
+    return
+  fi
+
+  if [[ -f "${TARGET_DIR}/opencode.json" ]]; then
+    echo "${TARGET_DIR}/opencode.json"
+    return
+  fi
+
+  echo "${TARGET_DIR}/opencode.json"
+}
 
 mkdir -p "${TARGET_DIR}"
 
@@ -124,9 +147,54 @@ cp "${SCRIPT_DIR}/package.json" "${TARGET_DIR}/package.json"
 rm -rf "${TARGET_DIR}/node_modules"
 cp -R "${SCRIPT_DIR}/node_modules" "${TARGET_DIR}/node_modules"
 
-if [[ ! -f "${TARGET_DIR}/opencode.json" && ! -f "${TARGET_DIR}/opencode.jsonc" ]]; then
-  cp "${SCRIPT_DIR}/opencode.json" "${TARGET_DIR}/opencode.json"
+OPENCODE_CONFIG_PATH="$(resolve_opencode_config_path)"
+BACKUP_PATH=""
+
+if [[ -f "${OPENCODE_CONFIG_PATH}" ]]; then
+  BACKUP_PATH="$(backup_file "${OPENCODE_CONFIG_PATH}")"
 fi
+
+TARGET_CONFIG_PATH="${OPENCODE_CONFIG_PATH}" \
+SCRIPT_DIR="${SCRIPT_DIR}" \
+PLUGIN_ENTRY="oh-my-openagent@${PLUGIN_ENTRY}" \
+node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const configPath = process.env.TARGET_CONFIG_PATH;
+const scriptDir = process.env.SCRIPT_DIR;
+const pluginEntry = process.env.PLUGIN_ENTRY;
+
+const { parse } = require(path.join(scriptDir, "node_modules", "jsonc-parser"));
+
+const existingContent = fs.existsSync(configPath)
+  ? fs.readFileSync(configPath, "utf8")
+  : "{}";
+
+const parsed = parse(existingContent);
+if (parsed === undefined) {
+  console.error(`Failed to parse OpenCode config: ${configPath}`);
+  process.exit(1);
+}
+
+if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+  console.error(`OpenCode config must be a JSON object: ${configPath}`);
+  process.exit(1);
+}
+
+const nextConfig = { ...parsed };
+const currentPlugins = Array.isArray(nextConfig.plugin) ? nextConfig.plugin : [];
+const filteredPlugins = currentPlugins.filter((entry) =>
+  typeof entry === "string" &&
+  entry !== "oh-my-openagent" &&
+  !entry.startsWith("oh-my-openagent@")
+);
+
+filteredPlugins.push(pluginEntry);
+nextConfig.plugin = filteredPlugins;
+
+fs.writeFileSync(configPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
+NODE
 
 if [[ ! -f "${TARGET_DIR}/oh-my-openagent.json" && ! -f "${TARGET_DIR}/oh-my-openagent.jsonc" ]]; then
   cp "${SCRIPT_DIR}/oh-my-openagent.json" "${TARGET_DIR}/oh-my-openagent.json"
@@ -134,6 +202,9 @@ fi
 
 cat <<MSG
 Installed offline bundle to: ${TARGET_DIR}
+
+OpenCode config merged: ${OPENCODE_CONFIG_PATH}
+${BACKUP_PATH:+Backup created: ${BACKUP_PATH}}
 
 Next steps:
   1. export OMO_SEND_ANONYMOUS_TELEMETRY=0
