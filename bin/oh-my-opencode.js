@@ -5,6 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { getPlatformPackageCandidates, getBinaryPath } from "./platform.js";
 
 const require = createRequire(import.meta.url);
@@ -80,6 +81,93 @@ function getPackageBaseName() {
   }
 }
 
+function shouldFallback(result, { platform, hasFallback }) {
+  if (!hasFallback) {
+    return false;
+  }
+
+  if (result.error) {
+    return true;
+  }
+
+  if (result.signal === "SIGILL") {
+    return true;
+  }
+
+  return isLinuxLoaderCompatibilityFailure({
+    platform,
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  });
+}
+
+export function isLinuxLoaderCompatibilityFailure({ platform, status, stdout = "", stderr = "" }) {
+  if (platform !== "linux" || status === 0 || status === null || status === undefined) {
+    return false;
+  }
+
+  const output = `${stdout}\n${stderr}`.toLowerCase();
+  return [
+    "glibc_",
+    "version `glibc_",
+    "not found",
+    "failed to open shared object file",
+    "libc.so",
+  ].some((pattern) => output.includes(pattern));
+}
+
+function probeBinaryCompatibility(binPath) {
+  return spawnSync(binPath, ["--version"], {
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+}
+
+function runBinary(binPath, args) {
+  return spawnSync(binPath, args, {
+    stdio: "inherit",
+  });
+}
+
+export function runBinaryWithFallback({
+  platform,
+  args,
+  resolvedBinaries,
+  probeImpl = probeBinaryCompatibility,
+  runImpl = runBinary,
+}) {
+  for (let index = 0; index < resolvedBinaries.length; index += 1) {
+    const currentBinary = resolvedBinaries[index];
+    const hasFallback = index < resolvedBinaries.length - 1;
+
+    if (hasFallback) {
+      const probeResult = probeImpl(currentBinary.binPath);
+      if (shouldFallback(probeResult, { platform, hasFallback })) {
+        continue;
+      }
+    }
+
+    const result = runImpl(currentBinary.binPath, args);
+
+    if (shouldFallback(result, { platform, hasFallback })) {
+      continue;
+    }
+
+    if (result.error) {
+      return { kind: "error", error: result.error };
+    }
+
+    if (result.signal) {
+      return { kind: "signal", signal: result.signal };
+    }
+
+    return { kind: "status", status: result.status ?? 1 };
+  }
+
+  return { kind: "status", status: 1 };
+}
+
 function main() {
   const { platform, arch } = process;
   const libcFamily = getLibcFamily();
@@ -119,35 +207,27 @@ function main() {
     process.exit(1);
   }
 
-  for (let index = 0; index < resolvedBinaries.length; index += 1) {
-    const currentBinary = resolvedBinaries[index];
-    const hasFallback = index < resolvedBinaries.length - 1;
-    const result = spawnSync(currentBinary.binPath, process.argv.slice(2), {
-      stdio: "inherit",
-    });
+  const outcome = runBinaryWithFallback({
+    platform,
+    args: process.argv.slice(2),
+    resolvedBinaries,
+  });
 
-    if (result.error) {
-      if (hasFallback) {
-        continue;
-      }
-
-      console.error(`\noh-my-opencode: Failed to execute binary.`);
-      console.error(`Error: ${result.error.message}\n`);
-      process.exit(2);
-    }
-
-    if (result.signal === "SIGILL" && hasFallback) {
-      continue;
-    }
-
-    if (result.signal) {
-      process.exit(getSignalExitCode(result.signal));
-    }
-
-    process.exit(result.status ?? 1);
+  if (outcome.kind === "error") {
+    console.error(`\noh-my-opencode: Failed to execute binary.`);
+    console.error(`Error: ${outcome.error.message}\n`);
+    process.exit(2);
   }
 
-  process.exit(1);
+  if (outcome.kind === "signal") {
+    process.exit(getSignalExitCode(outcome.signal));
+  }
+
+  process.exit(outcome.status);
 }
 
-main();
+const isDirectExecution = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isDirectExecution) {
+  main();
+}

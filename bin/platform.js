@@ -31,6 +31,29 @@ export function getPlatformPackageCandidates({ platform, arch, libcFamily, prefe
   const primaryPackage = getPlatformPackage({ platform, arch, libcFamily, packageBaseName });
   const baselinePackage = getBaselinePlatformPackage({ platform, arch, libcFamily, packageBaseName });
 
+  if (platform === "linux" && arch === "x64" && libcFamily === "glibc") {
+    const muslPrimaryPackage = getPlatformPackage({
+      platform,
+      arch,
+      libcFamily: "musl",
+      packageBaseName,
+    });
+    const muslBaselinePackage = getBaselinePlatformPackage({
+      platform,
+      arch,
+      libcFamily: "musl",
+      packageBaseName,
+    });
+
+    if (!baselinePackage || !muslBaselinePackage) {
+      return [primaryPackage];
+    }
+
+    return preferBaseline
+      ? [baselinePackage, primaryPackage, muslBaselinePackage, muslPrimaryPackage]
+      : [primaryPackage, baselinePackage, muslPrimaryPackage, muslBaselinePackage];
+  }
+
   if (!baselinePackage) {
     return [primaryPackage];
   }

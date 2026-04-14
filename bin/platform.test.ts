@@ -148,17 +148,19 @@ describe("getBinaryPath", () => {
 });
 
 describe("getPlatformPackageCandidates", () => {
-  test("returns x64 and baseline candidates for Linux glibc", () => {
+  test("returns glibc candidates first then musl fallbacks for Linux glibc", () => {
     // #given Linux x64 with glibc
     const input = { platform: "linux", arch: "x64", libcFamily: "glibc" };
 
     // #when getting package candidates
     const result = getPlatformPackageCandidates(input);
 
-    // #then returns modern first then baseline fallback
+    // #then returns glibc candidates first then musl fallbacks
     expect(result).toEqual([
       "oh-my-opencode-linux-x64",
       "oh-my-opencode-linux-x64-baseline",
+      "oh-my-opencode-linux-x64-musl",
+      "oh-my-opencode-linux-x64-musl-baseline",
     ]);
   });
 
@@ -176,7 +178,23 @@ describe("getPlatformPackageCandidates", () => {
     ]);
   });
 
-  test("returns baseline first when preferBaseline is true", () => {
+  test("returns baseline first and musl baseline fallback for Linux glibc when preferBaseline is true", () => {
+    // #given Linux x64 glibc and baseline preference
+    const input = { platform: "linux", arch: "x64", libcFamily: "glibc", preferBaseline: true };
+
+    // #when getting package candidates
+    const result = getPlatformPackageCandidates(input);
+
+    // #then baseline packages are preferred before non-baseline variants
+    expect(result).toEqual([
+      "oh-my-opencode-linux-x64-baseline",
+      "oh-my-opencode-linux-x64",
+      "oh-my-opencode-linux-x64-musl-baseline",
+      "oh-my-opencode-linux-x64-musl",
+    ]);
+  });
+
+  test("returns baseline first when preferBaseline is true on Windows", () => {
     // #given Windows x64 and baseline preference
     const input = { platform: "win32", arch: "x64", preferBaseline: true };
 
@@ -199,10 +217,12 @@ describe("getPlatformPackageCandidates", () => {
     // #when getting package candidates
     const result = getPlatformPackageCandidates(input);
 
-    // #then returns renamed package family candidates
+    // #then returns renamed package family candidates with musl fallbacks
     expect(result).toEqual([
       "oh-my-openagent-linux-x64",
       "oh-my-openagent-linux-x64-baseline",
+      "oh-my-openagent-linux-x64-musl",
+      "oh-my-openagent-linux-x64-musl-baseline",
     ]);
   });
   test("returns only one candidate for ARM64", () => {

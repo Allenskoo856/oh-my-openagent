@@ -3,6 +3,7 @@
 
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { getPlatformPackageCandidates, getBinaryPath } from "./bin/platform.js";
 
 const require = createRequire(import.meta.url);
@@ -86,6 +87,32 @@ function getPackageBaseName() {
   }
 }
 
+export function findInstalledPlatformPackage({
+  platform,
+  arch,
+  libcFamily,
+  packageBaseName,
+  resolveImpl,
+}) {
+  const packageCandidates = getPlatformPackageCandidates({
+    platform,
+    arch,
+    libcFamily,
+    packageBaseName,
+  });
+
+  const resolvedPackage = packageCandidates.find((pkg) => {
+    try {
+      resolveImpl(getBinaryPath(pkg, platform));
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  return { packageCandidates, resolvedPackage };
+}
+
 function main() {
   const { platform, arch } = process;
   const libcFamily = getLibcFamily();
@@ -100,20 +127,12 @@ function main() {
   }
 
   try {
-    const packageCandidates = getPlatformPackageCandidates({
+    const { packageCandidates, resolvedPackage } = findInstalledPlatformPackage({
       platform,
       arch,
       libcFamily,
       packageBaseName,
-    });
-
-    const resolvedPackage = packageCandidates.find((pkg) => {
-      try {
-        require.resolve(getBinaryPath(pkg, platform));
-        return true;
-      } catch {
-        return false;
-      }
+      resolveImpl: (specifier) => require.resolve(specifier),
     });
 
     if (!resolvedPackage) {
@@ -130,4 +149,8 @@ function main() {
   }
 }
 
-main();
+const isDirectExecution = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isDirectExecution) {
+  main();
+}
