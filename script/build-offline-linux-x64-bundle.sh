@@ -43,7 +43,7 @@ copy_platform_package() {
 
 pack_local_package() {
   local source_dir="${1}"
-  npm pack "${source_dir}" --pack-destination "${VENDOR_DIR}" >/dev/null
+  npm_config_ignore_scripts=true npm pack "${source_dir}" --pack-destination "${VENDOR_DIR}" >/dev/null
 }
 
 copy_root_package
